@@ -278,6 +278,53 @@
   let solution, given, values, notes, selected=-1, notesMode=false, mistakes=0;
   let history=[], timer=0, timerId=null, running=false, solved=false;
 
+  /* ---------- Persistence (localStorage) ---------- */
+  const SAVE_KEY="sudoku.save.v1";
+
+  function saveGame(){
+    if(solved) return;
+    try{
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        v:1,
+        diff:document.getElementById("difficulty").value,
+        solution, given, values,
+        notes: notes.map(row=>row.map(s=>[...s])),
+        mistakes, timer, selected, notesMode
+      }));
+    }catch(e){/* quota/private mode: ignore */}
+  }
+
+  function loadGame(){
+    try{
+      const raw=localStorage.getItem(SAVE_KEY);
+      if(!raw) return null;
+      const s=JSON.parse(raw);
+      if(!s || s.v!==1 || !s.values || !s.solution) return null;
+      return s;
+    }catch(e){ return null; }
+  }
+
+  function clearSave(){ try{ localStorage.removeItem(SAVE_KEY); }catch(e){} }
+
+  function restoreGame(s){
+    const diffSel=document.getElementById("difficulty");
+    if(s.diff && LABEL[s.diff]){ diffSel.value=s.diff; document.getElementById("diffLabel").textContent=LABEL[s.diff]; }
+    solution=s.solution;
+    given=s.given;
+    values=s.values;
+    notes=s.notes.map(row=>row.map(arr=>new Set(arr)));
+    mistakes=s.mistakes||0;
+    timer=s.timer||0;
+    selected=(typeof s.selected==="number")?s.selected:-1;
+    notesMode=!!s.notesMode;
+    history=[]; solved=false; running=false;
+    document.getElementById("mistakes").textContent=mistakes;
+    document.getElementById("notesBtn").classList.toggle("on",notesMode);
+    document.getElementById("overlay").classList.remove("show");
+    document.getElementById("timer").textContent=fmt(timer);
+    render();
+  }
+
   const boardEl=document.getElementById("board");
   const padEl=document.getElementById("pad");
   const cells=[];
@@ -325,6 +372,7 @@
     document.getElementById("overlay").classList.remove("show");
     resetTimer();
     render();
+    saveGame();
   }
 
   /* ---------- Interaction ---------- */
@@ -469,12 +517,14 @@
       b.querySelector(".left").textContent=left>0?left:"";
       b.classList.toggle("done",left<=0);
     });
+
+    saveGame();
   }
 
   /* ---------- Win / timer ---------- */
   function checkWin(){
     for(let r=0;r<9;r++)for(let c=0;c<9;c++){ if(values[r][c]!==solution[r][c]) return; }
-    solved=true; stopTimer();
+    solved=true; stopTimer(); clearSave();
     document.getElementById("winTime").textContent="Tempo: "+fmt(timer)+" · Errori: "+mistakes;
     setTimeout(()=>document.getElementById("overlay").classList.add("show"),250);
   }
@@ -512,7 +562,14 @@
   document.getElementById("undoBtn").addEventListener("click",undo);
   document.getElementById("hintBtn").addEventListener("click",hint);
 
-  buildBoard(); buildPad(); newGame();
+  // Save when the app is backgrounded or closed (reliable on iOS)
+  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") saveGame(); });
+  window.addEventListener("pagehide",saveGame);
+
+  // Startup: resume a saved game if one exists, otherwise deal a new one
+  buildBoard(); buildPad();
+  const saved=loadGame();
+  if(saved) restoreGame(saved); else newGame();
 })();
 
 /* ---------- Service worker (offline) ---------- */
